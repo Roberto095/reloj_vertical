@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#050507">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Reloj</title>
+<style>
+  /* ---------- Tokens ---------- */
+  :root{
+    --bg:      #050507;
+
+    /* Color principal. Los demás tonos se calculan solos. */
+    --ambar:   #F5A55C;
+    --tenue:   color-mix(in srgb, var(--ambar) 42%, #000);
+    --rail:    color-mix(in srgb, var(--ambar) 20%, #000);
+    --brillo:  color-mix(in srgb, var(--ambar) 20%, transparent);
+
+    /* Deriva anti-desgaste: dos ejes independientes */
+    --deriva-x: 0px;
+    --deriva-y: 0px;
+
+    /* Paleta de la interfaz: NO deriva del acento.
+       Los controles deben leerse igual de bien con la esfera en
+       ámbar, rojo o azul, así que se mantienen neutros. */
+    --ui:        #D2CBC4;   /* texto de botones */
+    --ui-suave:  #8E867E;   /* texto secundario */
+    --ui-fondo:  #1A171C;   /* relleno de botones */
+    --ui-borde:  #302B34;
+    --ui-panel:  #100E13;
+
+    /* El sol y la luna con su color propio: se reconocen de un vistazo */
+    --sol:  #F0B95E;
+    --luna: #A6BCE0;
+
+    --fuente:  'Roboto','Helvetica Neue',system-ui,sans-serif;
+    --peso:    100;
+    --track:   -.03em;
+  }
+
+  *{ margin:0; padding:0; box-sizing:border-box; }
+
+  html,body{
+    height:100%;
+    background:var(--bg);
+    overflow:hidden;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+
+  body{
+    font-family:'Roboto','Helvetica Neue',system-ui,sans-serif;
+    color:var(--ambar);
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ---------- Encabezado ---------- */
+  /* Grid de 3 columnas en vez de space-between: con 1fr auto 1fr
+     el icono queda centrado en la pantalla, no a medio camino entre
+     la fecha y la batería (que tienen anchos distintos). */
+  .encabezado{
+    flex:0 0 auto;
+    display:grid;
+    grid-template-columns:1fr auto 1fr;
+    align-items:center;
+    padding:max(1.6rem, env(safe-area-inset-top)) 1.6rem 0;
+    font-size:.68rem;
+    letter-spacing:.34em;
+    text-transform:uppercase;
+    color:var(--ui-suave);
+  }
+  #fecha{ justify-self:start; }
+  .indicador{ justify-self:center; display:flex; }
+  .indicador svg{ width:1.05rem; height:1.05rem; display:block; }
+  .bateria{ justify-self:end; display:flex; align-items:center; gap:.45em; letter-spacing:.2em; }
+  .bateria[hidden]{ display:none; }
+  .rayo{ color:var(--ambar); }
+
+  /* ---------- Reloj ---------- */
+  .reloj{
+    flex:1 1 auto;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    transform:translate(var(--deriva-x), var(--deriva-y));
+    transition:transform 2.5s ease-in-out;
+  }
+
+  .grupo{
+    font-size:min(46vw, 31vh);
+    font-family:var(--fuente);
+    font-weight:var(--peso);
+    letter-spacing:var(--track);
+    line-height:.86;
+    white-space:nowrap;
+    font-variant-numeric:tabular-nums;
+    text-shadow:0 0 .5em var(--brillo);
+  }
+
+  .separador{
+    display:flex;
+    gap:min(5vw, 3.2vh);
+    margin:min(2.4vh, 1.8vw) 0;
+    transition:opacity .35s ease;
+  }
+  .separador i{
+    width:min(3.4vw, 2.2vh);
+    aspect-ratio:1;
+    border-radius:50%;
+    background:var(--ambar);
+    box-shadow:0 0 .6em var(--brillo);
+  }
+  .separador.apagado{ opacity:.18; }
+
+  .sufijo{
+    font-family:var(--fuente);
+    font-size:.8rem;
+    letter-spacing:.4em;
+    color:var(--tenue);
+    margin-top:1.4rem;
+    text-transform:uppercase;
+  }
+  .sufijo[hidden]{ display:none; }
+
+  /* ---------- Riel de segundos ---------- */
+  .riel{
+    position:fixed;
+    top:14vh; bottom:14vh; right:0;
+    width:2px;
+    background:var(--rail);
+    /* solo en Y: en X se saldría del borde */
+    transform:translateY(var(--deriva-y));
+    transition:transform 2.5s ease-in-out;
+  }
+  .riel[hidden]{ display:none; }
+  .riel span{
+    position:absolute;
+    left:0; bottom:0;
+    width:100%;
+    background:var(--ambar);
+    height:0%;
+  }
+
+  .atenuador{
+    position:fixed; inset:0;
+    background:#000;
+    opacity:0;
+    pointer-events:none;
+  }
+
+  /* ---------- Editor de rutina ---------- */
+  .editor{
+    position:fixed; inset:0;
+    z-index:10;
+    background:var(--ui-panel);
+    padding:max(1.8rem, env(safe-area-inset-top)) 1.2rem max(1.2rem, env(safe-area-inset-bottom));
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+    gap:.6rem;
+  }
+  .editor[hidden]{ display:none; }
+  .editor h2{
+    font-size:.72rem;
+    font-weight:400;
+    letter-spacing:.34em;
+    text-transform:uppercase;
+    color:var(--ambar);
+  }
+  .ayuda{
+    font-size:.72rem;
+    line-height:1.5;
+    color:var(--ui-suave);
+    margin-bottom:.4rem;
+  }
+
+  .bloque{
+    display:flex;
+    gap:.5rem;
+    align-items:center;
+  }
+  .bloque input{
+    min-height:46px;
+    padding:.5rem .7rem;
+    background:var(--ui-fondo);
+    border:1px solid var(--ui-borde);
+    border-radius:10px;
+    color:var(--ui);
+    font:inherit;
+    font-size:.9rem;
+  }
+  .bloque input[type="time"]{ flex:0 0 auto; width:7.2rem; }
+  .bloque input[type="text"]{ flex:1 1 auto; min-width:0; }
+  .bloque input:focus{ outline:none; border-color:var(--ui); }
+
+  .borrar{
+    flex:0 0 auto;
+    width:46px; height:46px;
+    padding:0;
+    background:var(--ui-fondo);
+    border:1px solid var(--ui-borde);
+    border-radius:10px;
+    color:var(--ui-suave);
+    font:inherit; font-size:1.1rem;
+    cursor:pointer;
+  }
+
+  .editor .pie{ margin-top:1rem; }
+  .editor .pie button{
+    flex:1 1 auto;
+    min-height:46px;
+    background:var(--ui-fondo);
+    border:1px solid var(--ui-borde);
+    border-radius:10px;
+    color:var(--ui);
+    font:inherit; font-size:.7rem;
+    letter-spacing:.18em; text-transform:uppercase;
+    cursor:pointer;
+  }
+  .editor .pie button[data-accion="cerrarEditor"]{
+    color:var(--ambar);
+    background:color-mix(in srgb, var(--ambar) 13%, var(--ui-fondo));
+    border-color:color-mix(in srgb, var(--ambar) 40%, var(--ui-borde));
+  }
+  .vacio{ font-size:.72rem; color:var(--ui-suave); padding:1rem 0; }
+
+  /* ---------- Rutina ---------- */
+  .rutina{
+    margin-top:2.2rem;
+    font-size:.68rem;
+    letter-spacing:.32em;
+    text-transform:uppercase;
+    color:var(--tenue);
+    text-align:center;
+    transition:color .6s ease, opacity .6s ease;
+  }
+  .rutina[hidden]{ display:none; }
+  /* Al cambiar de bloque se enciende un rato y luego vuelve a apagarse */
+  .rutina.anuncio{
+    color:var(--ambar);
+    animation:latir 2.2s ease-in-out 3;
+  }
+  @keyframes latir{
+    0%, 100% { opacity:1; }
+    50%      { opacity:.45; }
+  }
+  @media (prefers-reduced-motion:reduce){
+    .rutina.anuncio{ animation:none; }
+  }
+
+  /* ---------- Pista de desbloqueo ---------- */
+  .pista{
+    position:fixed;
+    left:0; right:0;
+    bottom:max(2.6rem, env(safe-area-inset-bottom));
+    text-align:center;
+    font-size:.6rem;
+    letter-spacing:.28em;
+    text-transform:uppercase;
+    color:var(--ui-suave);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .25s ease;
+  }
+  .pista.visible{ opacity:1; }
+  .pista i{
+    display:block;
+    width:0;
+    height:2px;
+    margin:.8rem auto 0;
+    background:var(--ambar);
+    transition:width .18s ease;
+  }
+  .pista.cargando i{
+    width:38%;
+    transition:width 1200ms linear;
+  }
+
+  /* ---------- Panel ---------- */
+  .controles{
+    position:fixed;
+    left:0; right:0; bottom:0;
+    padding:1.1rem 1.2rem max(1.1rem, env(safe-area-inset-bottom));
+    display:flex;
+    flex-direction:column;
+    gap:.6rem;
+    background:var(--ui-panel);
+    border-top:1px solid var(--ui-borde);
+    transform:translateY(110%);
+    transition:transform .28s ease;
+  }
+  .controles.visible{ transform:translateY(0); }
+
+  .fila{ display:flex; gap:.5rem; align-items:center; }
+
+  .controles button{
+    flex:1 1 auto;
+    min-height:44px;
+    padding:.6rem .8rem;
+    background:var(--ui-fondo);
+    border:1px solid var(--ui-borde);
+    border-radius:10px;
+    color:var(--ui);
+    font:inherit;
+    font-size:.7rem;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    cursor:pointer;
+    transition:background .18s ease, color .18s ease, border-color .18s ease;
+  }
+  /* Activo: se tiñe con el acento, pero solo el activo */
+  .controles button[aria-pressed="true"]{
+    color:var(--ambar);
+    background:color-mix(in srgb, var(--ambar) 13%, var(--ui-fondo));
+    border-color:color-mix(in srgb, var(--ambar) 40%, var(--ui-borde));
+  }
+  .controles button:focus-visible{ outline:2px solid var(--ui); outline-offset:2px; }
+
+  /* Sol y luna con color propio, también dentro del botón */
+  [data-activo="dia"] svg{ color:var(--sol); }
+  [data-activo="noche"] svg{ color:var(--luna); }
+
+  .controles button svg{
+    width:1.15em; height:1.15em;
+    vertical-align:-.24em;
+    margin-right:.45em;
+  }
+
+  /* Paleta */
+  #paleta{ justify-content:space-between; }
+  #paleta button{
+    flex:0 0 auto;
+    width:44px; height:44px;
+    padding:0;
+    border:none;
+    border-radius:50%;
+  }
+  #paleta button[aria-pressed="true"]{
+    box-shadow:0 0 0 3px var(--bg), 0 0 0 5px var(--ambar);
+  }
+  #personalizado{
+    flex:0 0 auto;
+    width:44px; height:44px;
+    padding:0;
+    background:transparent;
+    border:1px dashed #4A3524;
+    border-radius:50%;
+    cursor:pointer;
+  }
+  #personalizado::-webkit-color-swatch-wrapper{ padding:3px; }
+  #personalizado::-webkit-color-swatch{ border:none; border-radius:50%; }
+
+  /* Cada botón de fuente se muestra en su propia tipografía */
+  #fuentes button{
+    text-transform:none;
+    letter-spacing:.01em;
+    font-size:.82rem;
+  }
+
+  .brillo label{
+    font-size:.62rem; letter-spacing:.28em;
+    text-transform:uppercase; color:var(--ui-suave);
+  }
+  input[type="range"]{ flex:1; accent-color:var(--ambar); height:44px; }
+
+  @media (orientation:landscape){
+    .reloj{ flex-direction:row; align-items:center; gap:.06em; }
+    .grupo{ font-size:min(26vw, 62vh); }
+    .separador{
+      flex-direction:column;
+      gap:min(9vh, 4vw);
+      margin:0 min(2vw, 3vh);
+    }
+    .separador i{ width:min(1.8vw, 4vh); }
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    .reloj, .riel, .separador{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="encabezado">
+    <span id="fecha">—</span>
+    <span class="indicador" id="indicador"></span>
+    <span class="bateria" id="bateria" hidden>
+      <span class="rayo" id="rayo" hidden>⚡</span><span id="nivel"></span>
+    </span>
+  </header>
+
+  <main class="reloj">
+    <div class="grupo" id="horas">00</div>
+    <div class="separador" id="separador"><i></i><i></i></div>
+    <div class="grupo" id="minutos">00</div>
+    <div class="sufijo" id="sufijo" hidden>am</div>
+    <div class="rutina" id="rutina"></div>
+  </main>
+
+  <div class="riel" id="riel"><span id="rielRelleno"></span></div>
+  <div class="atenuador" id="atenuador"></div>
+
+  <div class="pista" id="pista">
+    Mantén pulsado para desbloquear
+    <i></i>
+  </div>
+
+  <!-- El panel llega casi vacío: los botones los genera el JavaScript -->
+  <!-- Editor de rutina: pantalla aparte -->
+  <section class="editor" id="editor" hidden>
+    <h2>Rutina diaria</h2>
+    <p class="ayuda">Se repite todos los días. El texto se muestra desde esa hora hasta el siguiente bloque.</p>
+    <div id="listaBloques"></div>
+    <div class="fila pie">
+      <button data-accion="agregar">+ Agregar</button>
+      <button data-accion="cerrarEditor">Listo</button>
+    </div>
+  </section>
+
+  <nav class="controles" id="controles">
+    <div class="fila" id="bloqueo"></div>
+    <div class="fila" id="modos"></div>
+    <div class="fila" id="avisos"></div>
+    <div class="fila" id="paleta"></div>
+    <div class="fila" id="fuentes"></div>
+    <div class="fila" id="pesos"></div>
+    <div class="fila brillo">
+      <label for="brillo">Brillo</label>
+      <input type="range" id="brillo" min="0" max="88" value="0" step="1">
+    </div>
+  </nav>
+
+<script>
+const $ = id => document.getElementById(id);
+const raiz = document.documentElement.style;
+
+/* =========================================================
+   1. Catálogos: los datos de los que se genera la interfaz
+   ========================================================= */
+/* Modo día / noche.
+   Cada modo es un preajuste: no solo atenúa, también cambia el grosor.
+   De día el trazo fino se pierde con luz de ventana; de noche el grueso
+   encandila. Brillo y peso son la misma decisión. */
+const HORA_NOCHE = 19;   // a partir de las 19:00
+const HORA_DIA   = 6;    // hasta las 06:00
+
+const MODOS = {
+  dia:   { color:'#E8E4DC', peso:300, brillo:0  },
+  noche: { color:'#F5A55C', peso:100, brillo:55 }
+};
+
+const CICLO = ['auto', 'dia', 'noche'];
+
+const ICONOS = {
+  dia: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/>
+        </svg>`,
+  noche: `<svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20.5 15.3A8.6 8.6 0 0 1 9.2 4a8 8 0 1 0 11.3 11.3Z"/>
+          </svg>`,
+  candado: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4.5" y="10.5" width="15" height="10" rx="2"/>
+              <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>
+            </svg>`
+};
+
+/* Rutina diaria por defecto. El usuario la edita desde la app y su
+   versión queda guardada; esto es solo el punto de partida.
+   La hora se guarda como texto "HH:MM" porque es exactamente el
+   formato que usa <input type="time">: cero conversiones. */
+const BLOQUES_INICIALES = [
+  { hora:'06:30', texto:'Buenos días'          },
+  { hora:'08:00', texto:'Hora de trabajar'     },
+  { hora:'12:30', texto:'Hora de almorzar'     },
+  { hora:'14:00', texto:'De vuelta al trabajo' },
+  { hora:'18:00', texto:'Fin de jornada'       },
+  { hora:'19:30', texto:'Hora de estudiar'     },
+  { hora:'22:30', texto:'Hora de descansar'    }
+];
+
+const aMinutos = b => {
+  const [h, m] = b.hora.split(':').map(Number);
+  return h * 60 + m;
+};
+
+const COLORES = ['#F5A55C', '#E8E4DC', '#E04B3A', '#6BD1B0', '#7FA8FF'];
+
+const FUENTES = [
+  { nombre:'Roboto',   pila:"'Roboto','Helvetica Neue',system-ui,sans-serif",                   peso:100, track:'-.03em' },
+  { nombre:'Estrecha', pila:"'Roboto Condensed','sans-serif-condensed','Arial Narrow',sans-serif", peso:200, track:'-.02em' },
+  { nombre:'Serif',    pila:"'Noto Serif',Georgia,serif",                                       peso:200, track:'-.01em' },
+  { nombre:'Mono',     pila:"'Roboto Mono','Noto Sans Mono',ui-monospace,monospace",            peso:300, track:'-.02em' }
+];
+
+const PESOS = [
+  { nombre:'Fina', valor:100 },
+  { nombre:'Media', valor:300 },
+  { nombre:'Gruesa', valor:500 }
+];
+
+/* =========================================================
+   2. Estado: la única fuente de verdad
+   ========================================================= */
+const estado = {
+  modo:       'auto',   // 'auto' | 'dia' | 'noche'
+  ultimoModo: null,     // último preajuste aplicado
+  bloqueado:  false,
+  verRutina: true,
+  bloques:   BLOQUES_INICIALES,
+  sonido:    true,
+  formato24: true,
+  segundos:  true,
+  color:     COLORES[0],
+  fuente:    0,      // índice dentro de FUENTES
+  peso:      100,
+  brillo:    0
+};
+
+/* Qué modo corresponde ahora mismo. */
+function modoEfectivo(){
+  if (estado.modo !== 'auto') return estado.modo;
+  const h = new Date().getHours();
+  return (h >= HORA_NOCHE || h < HORA_DIA) ? 'noche' : 'dia';
+}
+
+/* Aplica el preajuste solo cuando el modo cambia de verdad.
+   Se guarda dentro de `estado` (y no en una variable suelta) para que
+   sobreviva al recargar: si no, cada arranque pisaría el color y el
+   grosor que el usuario dejó elegidos. */
+function sincronizarModo(){
+  const m = modoEfectivo();
+  if (m === estado.ultimoModo) return false;
+  estado.ultimoModo = m;
+  Object.assign(estado, MODOS[m]);
+  return true;
+}
+
+/* ---- Rutina ----
+   El bloque activo es el último cuya hora ya pasó. En la madrugada,
+   cuando ninguno del día ha empezado, sigue vigente el último de ayer. */
+function bloqueActual(){
+  if (!estado.bloques.length) return null;
+
+  const ahora = new Date();
+  const min = ahora.getHours() * 60 + ahora.getMinutes();
+  const orden = [...estado.bloques].sort((a, b) => aMinutos(a) - aMinutos(b));
+
+  let elegido = orden[orden.length - 1];        // el de ayer, por defecto
+  orden.forEach(b => { if (aMinutos(b) <= min) elegido = b; });
+  return elegido;
+}
+
+/* Se guarda la hora + texto, no el índice: la lista se reordena al
+   editarla y un índice quedaría apuntando a otra cosa. */
+let bloqueAplicado = null;
+let claveAplicada  = null;
+
+function sincronizarRutina(){
+  const b = bloqueActual();
+  const clave = b ? b.hora + '|' + b.texto : null;
+  if (clave === claveAplicada) return false;
+
+  const arranque = claveAplicada === null && bloqueAplicado === null;
+  claveAplicada  = clave;
+  bloqueAplicado = b;
+  if (!arranque && b) anunciar();     // al abrir la app no suena nada
+  return true;
+}
+
+/* =========================================================
+   3. Construir el panel a partir de los catálogos
+   ========================================================= */
+$('bloqueo').innerHTML = `<button data-accion="bloquear">${ICONOS.candado}Bloquear pantalla</button>`;
+
+$('avisos').innerHTML = `
+  <button data-accion="rutina">Rutina</button>
+  <button data-accion="sonido">Sonido</button>
+  <button data-accion="editar">Editar</button>`;
+
+$('modos').innerHTML = `
+  <button data-accion="modo"></button>
+  <button data-accion="formato"></button>
+  <button data-accion="segundos">Segundos</button>
+  <button data-accion="pantalla">Pantalla</button>`;
+
+$('paleta').innerHTML =
+  COLORES.map(c => `<button data-color="${c}" style="background:${c}" title="${c}"></button>`).join('') +
+  `<input type="color" id="personalizado" title="Color personalizado">`;
+
+$('fuentes').innerHTML = FUENTES.map((f, i) =>
+  `<button data-fuente="${i}" style="font-family:${f.pila};font-weight:${Math.max(f.peso, 200)}">${f.nombre}</button>`
+).join('');
+
+$('pesos').innerHTML = PESOS.map(p =>
+  `<button data-peso="${p.valor}">${p.nombre}</button>`
+).join('');
+
+/* =========================================================
+   4. render(): baja el estado a la pantalla.
+      Nadie más toca el DOM de configuración.
+   ========================================================= */
+function marcar(selector, prueba){
+  document.querySelectorAll(selector).forEach(b =>
+    b.setAttribute('aria-pressed', prueba(b))
+  );
+}
+
+function render(){
+  const f = FUENTES[estado.fuente];
+
+  raiz.setProperty('--ambar',  estado.color);
+  raiz.setProperty('--fuente', f.pila);
+  raiz.setProperty('--peso',   estado.peso);
+  raiz.setProperty('--track',  f.track);
+
+  $('atenuador').style.opacity = estado.brillo / 100;
+  $('brillo').value            = estado.brillo;
+  $('personalizado').value     = estado.color;
+  $('riel').hidden             = !estado.segundos;
+  $('sufijo').hidden           =  estado.formato24;
+
+  marcar('#paleta button',  b => b.dataset.color?.toLowerCase() === estado.color.toLowerCase());
+  marcar('#fuentes button', b => Number(b.dataset.fuente) === estado.fuente);
+  marcar('#pesos button',   b => Number(b.dataset.peso)   === estado.peso);
+
+  $('rutina').hidden      = !estado.verRutina || !bloqueAplicado;
+  $('rutina').textContent = bloqueAplicado ? bloqueAplicado.texto : '';
+
+  document.querySelector('[data-accion="rutina"]').setAttribute('aria-pressed', estado.verRutina);
+  document.querySelector('[data-accion="sonido"]').setAttribute('aria-pressed', estado.sonido);
+
+  const ETIQUETAS = { auto:'Auto', dia:'Día', noche:'Noche' };
+  const activo = modoEfectivo();
+
+  // data-activo alimenta las reglas CSS que colorean sol y luna
+  $('indicador').innerHTML = ICONOS[activo];
+  $('indicador').dataset.activo = activo;
+
+  const modo = document.querySelector('[data-accion="modo"]');
+  modo.dataset.activo = activo;
+  modo.innerHTML = ICONOS[activo] + ETIQUETAS[estado.modo];
+  modo.setAttribute('aria-pressed', estado.modo !== 'auto');
+  modo.title = estado.modo === 'auto'
+    ? `Automático: noche de ${HORA_NOCHE}:00 a ${HORA_DIA}:00`
+    : 'Modo fijo';
+
+  const formato = document.querySelector('[data-accion="formato"]');
+  formato.textContent = estado.formato24 ? '24 h' : '12 h';
+  formato.setAttribute('aria-pressed', estado.formato24);
+  document.querySelector('[data-accion="segundos"]')
+          .setAttribute('aria-pressed', estado.segundos);
+
+  pintarHora();
+  guardar();
+}
+
+/* =========================================================
+   5. Dibujar la hora
+   ========================================================= */
+const dosDigitos = n => String(n).padStart(2, '0');
+
+function pintarHora(){
+  const ahora = new Date();
+  let h = ahora.getHours();
+  const m = ahora.getMinutes();
+  const s = ahora.getSeconds();
+
+  if (!estado.formato24){
+    $('sufijo').textContent = h < 12 ? 'am' : 'pm';
+    h = h % 12 || 12;
+  }
+
+  $('horas').textContent   = estado.formato24 ? dosDigitos(h) : String(h);
+  $('minutos').textContent = dosDigitos(m);
+  $('rielRelleno').style.height = (s / 59 * 100) + '%';
+  $('separador').classList.toggle('apagado', s % 2 === 1);
+
+  $('fecha').textContent = ahora.toLocaleDateString('es-CO', {
+    weekday:'short', day:'numeric', month:'short'
+  }).replace(/\./g, '');
+
+  if (s === 0) aplicarDeriva();
+}
+
+/* Deriva anti-desgaste.
+
+   Dos senoidales de periodo distinto (≈9 y ≈15 minutos). Como la razón
+   entre ellos no es un número redondo, el recorrido no se cierra: la
+   figura barre todo el rectángulo en vez de repetir la misma órbita.
+   Es una curva de Lissajous, la misma idea de los osciloscopios.
+
+   Determinista a propósito: Math.random() podía dar tres posiciones
+   casi idénticas seguidas, que es justo lo que se quiere evitar. */
+const AMPLITUD = 14;                          // píxeles a cada lado
+let pasoDeriva = Math.floor(Date.now() / 60000);  // minuto absoluto: no reinicia al recargar
+
+function aplicarDeriva(){
+  pasoDeriva++;
+  const x = Math.sin(pasoDeriva * 0.70) * AMPLITUD;
+  const y = Math.cos(pasoDeriva * 0.41) * AMPLITUD;
+  raiz.setProperty('--deriva-x', x.toFixed(1) + 'px');
+  raiz.setProperty('--deriva-y', y.toFixed(1) + 'px');
+}
+
+function programarTic(){
+  // Ojo: dos llamadas separadas. Con `a() || b()` el cortocircuito
+  // se saltaría la segunda cuando la primera devuelve true.
+  const cambioModo   = sincronizarModo();
+  const cambioRutina = sincronizarRutina();
+
+  if (cambioModo || cambioRutina) render();
+  else pintarHora();
+
+  setTimeout(programarTic, 1000 - (Date.now() % 1000));
+}
+
+/* =========================================================
+   6. Eventos: solo mutan el estado y llaman a render()
+   ========================================================= */
+const controles = $('controles');
+let temporizadorPanel;
+
+function mostrarControles(){
+  controles.classList.add('visible');
+  clearTimeout(temporizadorPanel);
+  temporizadorPanel = setTimeout(() => controles.classList.remove('visible'), 6000);
+}
+
+controles.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  mostrarControles();
+  if (!b) return;
+
+  const d = b.dataset;
+  if (d.color)                    estado.color = d.color;
+  else if (d.fuente !== undefined){
+    estado.fuente = Number(d.fuente);
+    estado.peso   = FUENTES[estado.fuente].peso;   // grosor recomendado de esa familia
+  }
+  else if (d.peso)                estado.peso = Number(d.peso);
+  else if (d.accion === 'bloquear'){
+    estado.bloqueado = true;
+    controles.classList.remove('visible');
+    clearTimeout(temporizadorPanel);
+  }
+  else if (d.accion === 'modo'){
+    estado.modo = CICLO[(CICLO.indexOf(estado.modo) + 1) % CICLO.length];
+    estado.ultimoModo = null;     // fuerza que se reaplique el preajuste
+    sincronizarModo();
+  }
+  else if (d.accion === 'rutina')   estado.verRutina = !estado.verRutina;
+  else if (d.accion === 'editar'){ abrirEditor(); return; }
+  else if (d.accion === 'sonido'){
+    estado.sonido = !estado.sonido;
+    if (estado.sonido){ prepararAudio(); sonar(); }   // suena de muestra
+  }
+  else if (d.accion === 'formato')  estado.formato24 = !estado.formato24;
+  else if (d.accion === 'segundos') estado.segundos  = !estado.segundos;
+  else if (d.accion === 'pantalla'){ alternarPantalla(); return; }
+
+  render();
+});
+
+controles.addEventListener('input', e => {
+  if (e.target.id === 'brillo')        estado.brillo = Number(e.target.value);
+  if (e.target.id === 'personalizado') estado.color  = e.target.value;
+  mostrarControles();
+  render();
+});
+
+document.body.addEventListener('click', e => {
+  if (estado.bloqueado) return;              // bloqueado: el toque no abre nada
+  if (!editor.hidden) return;                // el editor tiene la pantalla
+  if (!controles.contains(e.target)){
+    mostrarControles();
+    mantenerEncendida();
+  }
+});
+
+/* ---- Desbloqueo: mantener pulsado ----
+   Un toque simple no sirve como salida, porque es justo lo que
+   queremos ignorar. Pulsación sostenida: intencional y difícil
+   de disparar sin querer. */
+const ESPERA_DESBLOQUEO = 1200;   // ms; debe coincidir con la transición de .pista i
+const pista = $('pista');
+let temporizadorDesbloqueo, temporizadorPista;
+
+function iniciarDesbloqueo(){
+  if (!estado.bloqueado) return;
+  clearTimeout(temporizadorPista);
+  pista.classList.add('visible', 'cargando');
+  temporizadorDesbloqueo = setTimeout(() => {
+    estado.bloqueado = false;
+    pista.classList.remove('visible', 'cargando');
+    mostrarControles();
+    render();
+  }, ESPERA_DESBLOQUEO);
+}
+
+function cancelarDesbloqueo(){
+  clearTimeout(temporizadorDesbloqueo);
+  pista.classList.remove('cargando');
+  if (estado.bloqueado){
+    // La pista se queda un momento más: así el toque accidental
+    // al menos explica por qué no pasó nada.
+    temporizadorPista = setTimeout(() => pista.classList.remove('visible'), 1600);
+  }
+}
+
+document.body.addEventListener('pointerdown', () => {
+  prepararAudio();          // cualquier toque sirve como gesto habilitante
+  iniciarDesbloqueo();
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach(evento =>
+  document.body.addEventListener(evento, cancelarDesbloqueo)
+);
+
+/* =========================================================
+   7. Pantalla encendida y orientación
+   ========================================================= */
+let bloqueo = null;
+
+async function mantenerEncendida(){
+  if (!('wakeLock' in navigator)) return;
+  try {
+    bloqueo = await navigator.wakeLock.request('screen');
+  } catch (e) {
+    console.warn('Wake Lock no disponible:', e.message);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible'){
+    mantenerEncendida();
+    pintarHora();
+  }
+});
+
+async function alternarPantalla(){
+  try {
+    if (!document.fullscreenElement){
+      await document.documentElement.requestFullscreen();
+      await screen.orientation.lock('portrait');
+    } else {
+      await document.exitFullscreen();
+    }
+  } catch (e) {
+    console.warn('Pantalla completa / rotación:', e.message);
+  }
+}
+
+/* =========================================================
+   8. Batería
+   ========================================================= */
+if (navigator.getBattery){
+  navigator.getBattery().then(bat => {
+    const pintar = () => {
+      $('bateria').hidden = false;
+      $('nivel').textContent = Math.round(bat.level * 100) + '%';
+      $('rayo').hidden = !bat.charging;
+    };
+    pintar();
+    bat.addEventListener('levelchange', pintar);
+    bat.addEventListener('chargingchange', pintar);
+  }).catch(() => {});
+}
+
+/* =========================================================
+   Editor de rutina
+   ========================================================= */
+const editor = $('editor');
+const lista  = $('listaBloques');
+
+/* Solo se redibuja al abrir, agregar o borrar.
+   Si se redibujara en cada tecla, el input perdería el foco a la
+   primera letra: reconstruir el HTML destruye el elemento enfocado. */
+function pintarEditor(){
+  if (!estado.bloques.length){
+    lista.innerHTML = `<p class="vacio">Sin bloques. Agregá el primero.</p>`;
+    return;
+  }
+  lista.innerHTML = estado.bloques.map((b, i) => `
+    <div class="bloque">
+      <input type="time" value="${b.hora}" data-i="${i}" data-campo="hora">
+      <input type="text" value="${b.texto.replace(/"/g, '&quot;')}"
+             data-i="${i}" data-campo="texto" maxlength="34" placeholder="Qué toca a esa hora">
+      <button class="borrar" data-accion="borrar" data-i="${i}" title="Quitar">×</button>
+    </div>`).join('');
+}
+
+function abrirEditor(){
+  editor.hidden = false;
+  controles.classList.remove('visible');
+  pintarEditor();
+}
+
+function cerrarEditor(){
+  // Ordenar al salir, no mientras se escribe: reordenar bajo los dedos
+  // del usuario es desconcertante.
+  estado.bloques.sort((a, b) => aMinutos(a) - aMinutos(b));
+  editor.hidden = true;
+  claveAplicada = null;          // recalcular con la rutina nueva
+  bloqueAplicado = null;
+  sincronizarRutina();
+  render();
+}
+
+/* Escribir solo actualiza el modelo. El DOM del editor ya está bien:
+   lo escribió el usuario. */
+editor.addEventListener('input', e => {
+  const campo = e.target.dataset.campo;
+  if (!campo) return;
+  const b = estado.bloques[Number(e.target.dataset.i)];
+  if (!b) return;
+  b[campo] = e.target.value;
+  guardar();
+});
+
+editor.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+
+  if (b.dataset.accion === 'borrar'){
+    estado.bloques.splice(Number(b.dataset.i), 1);
+    pintarEditor();              // cambió la cantidad: hay que redibujar
+    guardar();
+  }
+  else if (b.dataset.accion === 'agregar'){
+    estado.bloques.push({ hora:'12:00', texto:'' });
+    pintarEditor();
+    guardar();
+    lista.querySelector('.bloque:last-child input[type="time"]')?.focus();
+  }
+  else if (b.dataset.accion === 'cerrarEditor') cerrarEditor();
+});
+
+/* =========================================================
+   Guardado permanente
+   ========================================================= */
+const CLAVE = 'reloj-vertical';
+
+function guardar(){
+  try {
+    localStorage.setItem(CLAVE, JSON.stringify(estado));
+  } catch (e) {
+    // Modo incógnito o almacenamiento lleno: la app sigue funcionando,
+    // simplemente no recuerda nada.
+  }
+}
+
+function cargar(){
+  try {
+    const guardado = JSON.parse(localStorage.getItem(CLAVE) || '{}');
+    // Object.assign pisa solo las claves que existan en lo guardado.
+    // Así, al agregar una opción nueva al estado, las configuraciones
+    // viejas siguen cargando sin romperse.
+    Object.assign(estado, guardado);
+    if (!Array.isArray(estado.bloques)) estado.bloques = BLOQUES_INICIALES;
+  } catch (e) {
+    console.warn('No se pudo leer la configuración guardada.');
+  }
+}
+
+/* =========================================================
+   Aviso de cambio de bloque: sonido y destello
+   ========================================================= */
+
+/* El navegador no deja reproducir audio hasta que el usuario
+   interactúe con la página. Se prepara el contexto en el primer
+   toque; si no, llega la hora y suena el silencio. */
+let audio = null;
+
+function prepararAudio(){
+  try {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === 'suspended') audio.resume();
+  } catch (e) {
+    console.warn('Audio no disponible:', e.message);
+  }
+}
+
+/* Tres notas sintetizadas: ni un archivo mp3 en el repositorio. */
+function sonar(){
+  if (!estado.sonido || !audio || audio.state !== 'running') return;
+  const inicio = audio.currentTime;
+
+  [523.25, 659.25, 783.99].forEach((frecuencia, i) => {   // do - mi - sol
+    const osc = audio.createOscillator();
+    const gan = audio.createGain();
+    const t   = inicio + i * 0.19;
+
+    osc.type = 'sine';
+    osc.frequency.value = frecuencia;
+
+    // Envolvente: subida corta y caída larga. Sin esto se oye un "clic".
+    gan.gain.setValueAtTime(0.0001, t);
+    gan.gain.exponentialRampToValueAtTime(0.16, t + 0.04);
+    gan.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+
+    osc.connect(gan).connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + 1.2);
+  });
+}
+
+function anunciar(){
+  sonar();
+  const r = $('rutina');
+  r.classList.add('anuncio');
+  setTimeout(() => r.classList.remove('anuncio'), 90000);   // destaca 90 s
+}
+
+/* =========================================================
+   Service worker: hace que el reloj funcione sin conexión
+   ========================================================= */
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .catch(e => console.warn('Service worker no registrado:', e.message));
+  });
+}
+
+/* ---- Arranque ---- */
+cargar();
+aplicarDeriva();
+sincronizarModo();
+sincronizarRutina();
+render();
+programarTic();
+mantenerEncendida();
+</script>
+</body>
+</html>
