@@ -3,7 +3,6 @@
 Reloj de escritorio para dejar un celular Android encendido en posición vertical.
 Un solo archivo HTML, sin dependencias ni conexión a internet.
 
-**Demo:** https://roberto095.github.io/reloj-vertical/
 
 ## Qué hace
 
